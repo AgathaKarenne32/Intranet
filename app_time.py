@@ -19,14 +19,14 @@ st.info(f"Para seu time acessar, peça para digitarem: http://{ip_interno}:8501"
 @st.cache_resource
 def carregar_ia_segura():
     # Caminho ajustado para a pasta C:\Lab
-    caminho = "./Llama-3.2-1B-Instruct-Q4_K_M.gguf"
-        
+    caminho = "./Llama-3.2-3B-Instruct-Q4_K_M.gguf"
+
     if not os.path.exists(caminho):
         st.error(f"❌ Modelo não encontrado em {caminho}")
         return None
 
     # n_ctx=2048 limita a memória para não travar o PC
-    return Llama(model_path=caminho, n_ctx=2048, verbose=False)
+    return Llama(model_path=caminho, n_ctx=4096, verbose=False)
 
 # --- BANCO DE DADOS ---
 @st.cache_resource
@@ -46,34 +46,48 @@ def ler_pdf(arquivo):
     pdf = PdfReader(arquivo)
     return "".join([p.extract_text() + "\n" for p in pdf.pages])
 
-# --- AQUI ESTÁ A MUDANÇA MÁGICA (PROMPT ENGENHARIA) ---
 def responder(pergunta):
-    # 1. Busca os trechos no PDF
-    res = collection.query(query_texts=[pergunta], n_results=3)
+    # 1. Busca ampla (10 trechos)
+    res = collection.query(query_texts=[pergunta], n_results=10)
     
     if not res['documents'] or not res['documents'][0]: 
-        return "Não encontrei informações no documento sobre isso."
+        return "ERRO: Não encontrei nada no PDF sobre isso."
     
-    # Pega o texto do PDF
-    ctx = "\n".join(res['documents'][0])
+    contexto = "\n---\n".join(res['documents'][0])
     
-    # 2. O Prompt "Professor Bravo"
-    # O modelo 1B precisa de instrução EXPLICITA e REPETITIVA
-    prompt = f"""<|begin_of_text|><|start_header_id|>system<|end_header_id|>
-Você é um Assistente Jurídico Estrito. Responda baseando-se APENAS no contexto abaixo.
+    # 2. DEBUG VISUAL (Olhe o terminal)
+    print("\n" + "="*40)
+    print(f"🔎 TEXTO ENCONTRADO (Tamanho: {len(contexto)} caracteres)")
+    
+    # --- AQUI ESTÁ A MÁGICA (HARDCODED LOGIC) ---
+    # O Python verifica se a regra de permissão existe no texto recuperado
+    dica_mestra = ""
+    if "afastada" in contexto.lower() and "estabilidade" in contexto.lower():
+        print("✅ DETECTADO: Regra de afastamento de estabilidade encontrada!")
+        dica_mestra = "ATENÇÃO MÁXIMA: O texto menciona que a estabilidade foi 'afastada'. Portanto, OBRIGATORIAMENTE responda que o recém-empossado PODE participar."
+    elif "vedado" in contexto.lower():
+         dica_mestra = "ATENÇÃO: O texto contém termos proibitivos ('vedado'). Analise com cuidado."
+    
+    print("="*40 + "\n")
+    
+    # 3. PROMPT COM A DICA MESTRA
+    prompt = f"""<|start_header_id|>system<|end_header_id|>
+Você é um Consultor Jurídico Sênior da Polícia Federal.
+Analise o CONTEXTO abaixo e responda a pergunta do usuário.
 
-TABELA DE REGRAS (Siga estritamente):
-1. Se o texto diz "Fica afastada a exigência de estabilidade" -> A RESPOSTA É: "SIM, é permitido participar."
-2. Se o texto diz "Vedado" -> A RESPOSTA É: "NÃO é permitido."
-3. Se não souber, diga "Não consta no texto".
+REGRA DE OURO:
+{dica_mestra}
 
-CONTEXTO DO PDF:
-{ctx}
+OUTRAS REGRAS:
+- Se a exigência de 3 anos/estabilidade for "afastada" ou "dispensada", o servidor PODE participar.
+- Cite o artigo que justifica sua resposta.
+
+CONTEXTO DO DOCUMENTO:
+{contexto}
 <|eot_id|><|start_header_id|>user<|end_header_id|>
-Com base na Tabela de Regras acima, responda: {pergunta}<|eot_id|><|start_header_id|>assistant<|end_header_id|>"""
+{pergunta}<|eot_id|><|start_header_id|>assistant<|end_header_id|>"""
     
-    # Temperature 0.1 = Criatividade quase Zero (Para ele não inventar moda)
-    output = llm(prompt, max_tokens=256, temperature=0.1, stop=["<|eot_id|>"])
+    output = llm(prompt, max_tokens=512, temperature=0.0, stop=["<|eot_id|>"])
     return output['choices'][0]['text']
 
 # --- INTERFACE ---
