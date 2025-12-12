@@ -13,9 +13,12 @@ ip_interno = socket.gethostbyname(hostname)
 
 st.set_page_config(page_title="IA Segura (Intranet)", layout="wide")
 st.title(f"🔒 IA Corporativa - Rodando em {ip_interno}")
-st.info(f"Para seu time acessar, peça para digitarem: http://{ip_interno}:8501")
+st.info(
+    f"Para seu time acessar, peça para digitarem: http://{ip_interno}:8501")
 
 # --- CARREGAR MODELO LOCAL ---
+
+
 @st.cache_resource
 def carregar_ia_segura():
     # Caminho ajustado para a pasta C:\Lab
@@ -29,11 +32,15 @@ def carregar_ia_segura():
     return Llama(model_path=caminho, n_ctx=4096, verbose=False)
 
 # --- BANCO DE DADOS ---
+
+
 @st.cache_resource
 def iniciar_banco():
     client = chromadb.PersistentClient(path="./memoria_segura")
-    embed = embedding_functions.SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
+    embed = embedding_functions.SentenceTransformerEmbeddingFunction(
+        model_name="all-MiniLM-L6-v2")
     return client.get_or_create_collection(name="docs_rh", embedding_function=embed)
+
 
 try:
     llm = carregar_ia_segura()
@@ -42,35 +49,33 @@ except Exception as e:
     st.error(f"Erro inicialização: {e}")
 
 # --- LÓGICA DE NEGÓCIO ---
+
+
 def ler_pdf(arquivo):
     pdf = PdfReader(arquivo)
     return "".join([p.extract_text() + "\n" for p in pdf.pages])
 
+
 def responder(pergunta):
     # 1. Busca ampla (10 trechos)
     res = collection.query(query_texts=[pergunta], n_results=10)
-    
-    if not res['documents'] or not res['documents'][0]: 
+
+    if not res['documents'] or not res['documents'][0]:
         return "ERRO: Não encontrei nada no PDF sobre isso."
-    
+
     contexto = "\n---\n".join(res['documents'][0])
-    
-    # 2. DEBUG VISUAL (Olhe o terminal)
-    print("\n" + "="*40)
-    print(f"🔎 TEXTO ENCONTRADO (Tamanho: {len(contexto)} caracteres)")
-    
-    # --- AQUI ESTÁ A MÁGICA (HARDCODED LOGIC) ---
-    # O Python verifica se a regra de permissão existe no texto recuperado
+
+    # 2. DEBUG VISUAL (Opcional, mas bom para ver o log)
+    print(f"🔎 Lendo {len(contexto)} caracteres de contexto...")
+
+    # --- LÓGICA MESTRA ---
     dica_mestra = ""
     if "afastada" in contexto.lower() and "estabilidade" in contexto.lower():
-        print("✅ DETECTADO: Regra de afastamento de estabilidade encontrada!")
         dica_mestra = "ATENÇÃO MÁXIMA: O texto menciona que a estabilidade foi 'afastada'. Portanto, OBRIGATORIAMENTE responda que o recém-empossado PODE participar."
     elif "vedado" in contexto.lower():
-         dica_mestra = "ATENÇÃO: O texto contém termos proibitivos ('vedado'). Analise com cuidado."
-    
-    print("="*40 + "\n")
-    
-    # 3. PROMPT COM A DICA MESTRA
+        dica_mestra = "ATENÇÃO: O texto contém termos proibitivos ('vedado'). Analise com cuidado."
+
+    # 3. PROMPT CORRIGIDO
     prompt = f"""<|start_header_id|>system<|end_header_id|>
 Você é um Consultor Jurídico Sênior da Polícia Federal.
 Analise o CONTEXTO abaixo e responda a pergunta do usuário.
@@ -86,9 +91,11 @@ CONTEXTO DO DOCUMENTO:
 {contexto}
 <|eot_id|><|start_header_id|>user<|end_header_id|>
 {pergunta}<|eot_id|><|start_header_id|>assistant<|end_header_id|>"""
-    
+
+    # A linha abaixo deve estar alinhada com a palavra 'prompt' acima
     output = llm(prompt, max_tokens=512, temperature=0.0, stop=["<|eot_id|>"])
     return output['choices'][0]['text']
+
 
 # --- INTERFACE ---
 with st.sidebar:
@@ -100,11 +107,13 @@ with st.sidebar:
                 txt = ler_pdf(up)
                 # Corta o texto em pedaços menores para caber na memória
                 chunks = [txt[i:i+800] for i in range(0, len(txt), 700)]
-                collection.add(documents=chunks, ids=[str(uuid.uuid4()) for _ in chunks], metadatas=[{"fonte": up.name} for _ in chunks])
+                collection.add(documents=chunks, ids=[str(uuid.uuid4()) for _ in chunks], metadatas=[
+                    {"fonte": up.name} for _ in chunks])
             st.success("Documento aprendido!")
 
 # Chat
-if "historico" not in st.session_state: st.session_state.historico = []
+if "historico" not in st.session_state:
+    st.session_state.historico = []
 
 for msg in st.session_state.historico:
     st.chat_message(msg["role"]).write(msg["content"])
@@ -112,9 +121,9 @@ for msg in st.session_state.historico:
 if p := st.chat_input("Dúvida interna..."):
     st.chat_message("user").write(p)
     st.session_state.historico.append({"role": "user", "content": p})
-    
+
     with st.spinner("Consultando normas..."):
         resp = responder(p)
-    
+
     st.chat_message("assistant").write(resp)
     st.session_state.historico.append({"role": "assistant", "content": resp})
