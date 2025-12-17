@@ -1,5 +1,6 @@
 streamlit
-chromadb
-pypdf
-sentence-transformers
 llama-cpp-python
+chromadb
+pymupdf
+rank_bm25
+spacy

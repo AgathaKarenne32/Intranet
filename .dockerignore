@@ -1,4 +1,12 @@
-__pycache__
-venv
-.git
-memoria_segura
+# Pastas de ambiente e cache
+__pycache__/
+venv/
+.git/
+.gitignore
+
+# Bancos de dados locais (gerados na hora, não devem ser copiados)
+banco_vetorial/
+memoria_segura/
+
+# Arquivos temporários
+*.pyc
