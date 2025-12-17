@@ -1,5 +1,4 @@
 *.gguf
-memoria_segura/
 __pycache__/
 banco_vetorial/
 *.pdf
