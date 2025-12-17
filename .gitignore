@@ -1,4 +1,5 @@
 *.gguf
 memoria_segura/
 __pycache__/
-ia_completa.tar.gz
+banco_vetorial/
+*.pdf
