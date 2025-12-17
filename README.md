@@ -1,51 +1,61 @@
-# 🏛️ Assistente Jurídico Soberano (IA Intranet - Air Gapped)
+# 👮‍♂️ IA Assistente de Legislação (Federal Pro)
 
-![Python](https://img.shields.io/badge/Python-3.12-blue?style=for-the-badge&logo=python&logoColor=white)
-![Docker](https://img.shields.io/badge/Docker-Optimized_CPU-2496ED?style=for-the-badge&logo=docker&logoColor=white)
-![Security](https://img.shields.io/badge/Security-100%25_Offline-red?style=for-the-badge&logo=lock)
-![AI Model](https://img.shields.io/badge/Model-Llama_3.2_3B_GGUF-green?style=for-the-badge)
-
-Uma solução de Inteligência Artificial Generativa **privada e containerizada**, projetada para operar em ambientes de alta segurança (sem acesso à internet/Air-Gapped). O sistema analisa documentos internos (PDFs), editais e normativas, fornecendo respostas jurídicas fundamentadas sem risco de exfiltração de dados.
+Este projeto é um assistente jurídico baseado em RAG (Retrieval-Augmented Generation), projetado para interpretar normativos da Polícia Federal, responder dúvidas sobre legislação e consultar tabelas de índices de localidades.
 
 ---
 
-## 🎯 O Problema
+## 🚀 Atualização de Arquitetura: A Evolução para RAG Tri-Híbrido
 
-O uso de IAs públicas (como ChatGPT ou Gemini) em órgãos governamentais apresenta riscos críticos:
-* **Vazamento de Dados:** As informações enviadas são processadas em servidores estrangeiros.
-* **Dependência de Internet:** Em operações táticas ou servidores seguros, nem sempre há acesso à web.
-* **Alucinações Jurídicas:** Modelos genéricos falham em interpretar "Lógica Negativa" em editais (ex: *Fica afastada a exigência...*).
+Nas últimas versões, realizamos uma reformulação drástica no motor de busca da IA. Saímos de uma abordagem puramente Vetorial (ChromaDB) para uma abordagem **Tri-Híbrida (Vetorial + BM25 + NER)**.
 
-## 💡 A Solução
+Abaixo detalhamos os motivos técnicos, as vulnerabilidades encontradas no modelo anterior e a solução implementada.
 
-Desenvolvi um microserviço que roda o modelo **Llama 3.2 3B** localmente, otimizado para CPUs convencionais (sem necessidade de GPUs de alto custo). O sistema utiliza **RAG (Retrieval-Augmented Generation)** com uma camada de injeção lógica proprietária para garantir precisão normativa.
+### 🚩 Vulnerabilidades e Problemas Encontrados (Post-Mortem)
+
+Durante os testes de estresse (commits anteriores), identificamos três falhas críticas na arquitetura de busca vetorial simples:
+
+#### 1. O Paradoxo das Tabelas Dispersas ("O Problema do Chuí")
+* **Sintoma:** A IA respondia "Não consta" ou alucinava valores ao perguntar sobre índices em tabelas (ex: "Qual o índice de Chuí?").
+* **Causa Técnica:** A Busca Vetorial (Embeddings) baseia-se em **densidade semântica**. Páginas de tabelas (ex: Página 14 do PDF) contêm apenas listas de nomes e números, sem frases conectivas ("O índice é..."). Para o modelo vetorial, essas páginas parecem "ruído" ou têm baixa relevância semântica comparadas a textos explicativos.
+* **Falha:** O banco vetorial ignorava a página da tabela, impedindo a recuperação do dado exato (3.75).
+
+#### 2. O Conflito de Regras (Regra Geral vs. Exceção)
+* **Sintoma:** Ao perguntar "Sou recém-empossado, posso participar?", a IA respondia **NÃO** (baseado no Art. 20), ignorando a exceção do **Art. 34** ("Fica afastada a exigência...").
+* **Causa Técnica:** O Artigo 20 (proibição) repete palavras-chave como "concurso" e "participação" várias vezes. O Artigo 34 (permissão) é curto e está no final do documento. O algoritmo de similaridade priorizava o texto mais denso (Art. 20), ocultando a exceção.
+
+#### 3. A Limitação do "Hardcoding" (Busca Manual)
+* **Tentativa Anterior:** Tentamos corrigir os problemas acima com `if "chuí" in texto`.
+* **Vulnerabilidade:** Essa abordagem não é escalável. Exigiria escrever o nome de todas as 5.570 cidades do Brasil no código. Além disso, não funcionaria para novos PDFs com estruturas diferentes.
 
 ---
 
-## 🛡️ Segurança e Privacidade (Arquitetura Zero-Trust)
+### 🛡️ A Nova Solução: Arquitetura Tri-Híbrida
 
-A principal característica deste projeto é a **Soberania de Dados**.
+Para resolver esses problemas de forma universal (sem regras manuais), implementamos três camadas de recuperação de informação:
 
-* **🚫 Sem APIs Externas:** O sistema não se conecta à OpenAI, Google ou Meta. O cabo de rede pode ser desconectado e a IA continua funcionando.
-* **🧠 Modelo Estático (GGUF):** O arquivo do modelo (`.gguf`) contém apenas pesos matemáticos (tensors). Ele **não é um executável**, impossibilitando a injeção de vírus ou backdoors ativos.
-* **📦 Isolamento via Docker:** A aplicação roda em um container isolado do sistema operacional hospedeiro.
-* **🧹 Memória Volátil:** Nenhum dado da consulta é salvo em disco permanentemente. Ao desligar o container, o contexto da sessão é destruído.
+| Camada | Tecnologia | Função Específica | Resolve Qual Problema? |
+| :--- | :--- | :--- | :--- |
+| **1. Semântica** | **ChromaDB** (Embeddings) | Entende o *sentido* da pergunta (ex: "Como funciona o cálculo?"). | Perguntas conceituais e interpretação de texto. |
+| **2. Léxica (Raridade)** | **Rank-BM25** (TF-IDF) | Calcula a estatística de palavras. Dá peso alto para palavras raras (ex: "Empossado", "Chuí") e ignora palavras comuns. | **Tabelas e Regras Específicas.** Garante que o Art. 34 e a cidade Chuí sejam encontrados pela exatidão da palavra. |
+| **3. Entidades (NER)** | **spaCy** (Large Model) | Identifica *o que* são as palavras (Locais, Pessoas, Organizações). | **Desambiguação.** Permite listar "quais cidades aparecem no texto" mesmo que a formatação mude. |
+
+### 🧠 Engenharia de Prompt (Hierarquia Jurídica)
+
+Além da busca, refinamos o "System Prompt" do modelo Llama 3.2 para respeitar a hierarquia das normas:
+
+> *"⚠️ HIERARQUIA DAS REGRAS: Se o texto citar o Art. 34 (Disposições Finais), ele ANULA qualquer regra anterior de proibição. Priorize exceções explícitas."*
+
+Isso eliminou as alucinações onde a IA tinha "medo" de contradizer a regra geral.
 
 ---
 
-## 🚀 Como Usar (Implantação via Docker)
+## 📦 Instalação e Dependências
 
-Devido ao tamanho do modelo, a entrega é feita via imagem Docker comprimida.
-
-### 1. Pré-requisitos
-
-* Computador com Docker Desktop instalado.
-* Arquivo da imagem: `ia_completa.tar.gz` (aprox. 2.6GB).
-* **Não é necessária conexão com a internet.**
-
-### 2. Carregar a Imagem (Load)
-
-No terminal, navegue até a pasta do arquivo e execute:
+Devido à inclusão de motores de PNL (Processamento de Linguagem Natural), novas bibliotecas são necessárias:
 
 ```bash
-docker load -i ia_completa.tar.gz
+# Instalar bibliotecas de busca e processamento
+pip install rank_bm25 spacy
+
+# Baixar o modelo de linguagem em Português (Large)
+python -m spacy download pt_core_news_lg
