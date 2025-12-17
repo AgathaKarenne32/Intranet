@@ -1,5 +1,0 @@
-streamlit
-chromadb
-pypdf
-sentence-transformers
-llama-cpp-python
