@@ -1,3 +1,21 @@
-*.gguf
-memoria_segura/
+# Ignorar ambiente virtual Python
+venv/
 __pycache__/
+*.pyc
+
+# Ignorar Modelos de IA Gigantes (Baixamos de novo se precisar)
+modelo_llm*/
+modelo_colbert/
+rapidocr_models/
+
+# Ignorar Banco de Dados e Arquivos Locais
+*.db
+banco_conhecimento.json
+*.sqlite3
+
+# Ignorar PDFs (opcional, se forem sigilosos)
+data/*.pdf
+
+# Ignorar logs e arquivos de sistema
+*.log
+.DS_Store
