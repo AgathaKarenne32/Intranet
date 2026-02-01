@@ -1,15 +1,26 @@
 import os
 import re
 import sqlite3
+import time
 import traceback
 from docling.document_converter import DocumentConverter, PdfFormatOption
-from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.datamodel.pipeline_options import PdfPipelineOptions, TableFormerMode
 from docling.datamodel.base_models import InputFormat
+
+# --- CONFIGURAÇÕES DE VELOCIDADE (MEXA AQUI) ---
+# Se o PDF for texto digital (selecionável), coloque USAR_OCR = False (Fica instantâneo)
+# Se o PDF for escaneado (imagem), coloque USAR_OCR = True (Demora, mas funciona)
+USAR_OCR = True 
+
+# Se estiver MUITO lento, coloque False. A IA de tabelas é pesada na CPU.
+# Nossa "Janela Deslizante" já ajuda a pegar tabelas, então podemos desligar isso para ganhar velocidade.
+USAR_IA_TABELAS = False 
+# -----------------------------------------------
 
 PASTA_DATA = "data"
 ARQUIVO_DB = "auditor.db"
 
-# CONFIGURAÇÃO DE CORTE
+# Configuração de Corte
 TAMANHO_CHUNK = 1000  
 OVERLAP = 200         
 
@@ -27,13 +38,11 @@ def criar_chunks_deslizantes(texto, tamanho=TAMANHO_CHUNK, overlap=OVERLAP):
             if ultimo_espaco != -1:
                 fim = inicio + ultimo_espaco
                 pedaco = texto[inicio:fim]
-        
         yield pedaco
         inicio += (len(pedaco) - overlap)
         if len(pedaco) < overlap: break
 
 def inicializar_banco():
-    # Timeout de 30s para evitar travamentos
     conn = sqlite3.connect(ARQUIVO_DB, timeout=30)
     cursor = conn.cursor()
     cursor.execute('''
@@ -48,7 +57,11 @@ def inicializar_banco():
     return conn
 
 def processar_e_salvar():
-    print("🚀 INICIANDO INGESTÃO TURBO (SEM OCR)...")
+    print("="*50)
+    print("🚀 INICIANDO INGESTÃO CONFIGURÁVEL")
+    print(f"   ⚙️  MODO OCR: {'[LIGADO]' if USAR_OCR else '[DESLIGADO] (Modo Turbo)'}")
+    print(f"   ⚙️  IA DE TABELAS: {'[LIGADA]' if USAR_IA_TABELAS else '[DESLIGADA] (Ganho de Velocidade)'}")
+    print("="*50)
     
     if not os.path.exists(PASTA_DATA):
         print("   ⚠️ Pasta data não existe.")
@@ -66,12 +79,15 @@ def processar_e_salvar():
         print(f"❌ Erro ao abrir banco: {e}")
         return
 
-    # --- AQUI ESTÁ A MUDANÇA ---
     try:
         pipeline = PdfPipelineOptions()
-        pipeline.do_ocr = False  # <--- DESLIGADO PARA VELOCIDADE MÁXIMA
-        pipeline.do_table_structure = True # Mantém inteligência de tabelas
+        pipeline.do_ocr = USAR_OCR
+        pipeline.do_table_structure = USAR_IA_TABELAS
         
+        # Otimização extra: Se desligar tabelas, usa modo rápido
+        if not USAR_IA_TABELAS:
+            pipeline.table_structure_options.mode = TableFormerMode.FAST
+
         converter = DocumentConverter(format_options={
             InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline)
         })
@@ -80,46 +96,44 @@ def processar_e_salvar():
         return
 
     for arq in arquivos:
-        print(f"   📖 Lendo RÁPIDO: {arq}...")
+        print(f"   📖 Lendo: {arq}...")
+        inicio_tempo = time.time()
+        
         try:
             caminho_completo = os.path.join(PASTA_DATA, arq)
             
-            # Converte
+            # Conversão
+            print("      ...Processando IA (Isso consome CPU)...")
             res = converter.convert(caminho_completo)
             texto_limpo = limpar_texto(res.document.export_to_markdown())
             
-            # Verifica se leu algo (se vier vazio, o PDF precisava de OCR)
-            if len(texto_limpo) < 50:
-                print(f"      ⚠️ ALERTA: O texto veio vazio! Esse PDF parece ser uma imagem escaneada.")
-                print(f"      ⚠️ Você precisará ativar o OCR novamente e esperar.")
+            # Validação simples
+            if len(texto_limpo) < 100 and not USAR_OCR:
+                print("      ⚠️ AVISO: O texto saiu vazio. Esse PDF parece ser uma imagem.")
+                print("      ⚠️ Mude USAR_OCR = True no código e tente de novo.")
                 continue
 
-            print(f"      💾 Salvando trechos...")
-            
+            print(f"      💾 Gravando no Banco de Dados...")
             novos = 0
             for i, pedaco in enumerate(criar_chunks_deslizantes(texto_limpo)):
                 uid = f"{arq}_part_{i}"
                 try:
-                    cursor.execute('''
-                        INSERT OR REPLACE INTO trechos (id, origem, conteudo) 
-                        VALUES (?, ?, ?)
-                    ''', (uid, arq, pedaco))
+                    cursor.execute('INSERT OR REPLACE INTO trechos (id, origem, conteudo) VALUES (?, ?, ?)', (uid, arq, pedaco))
                     novos += 1
-                except sqlite3.OperationalError:
-                    pass # Ignora erros de lock momentâneos
-
-                if novos % 100 == 0:
-                    conn.commit()
+                except sqlite3.OperationalError: pass
+                
+                if novos % 50 == 0: conn.commit()
 
             conn.commit()
-            print(f"      ✅ {novos} trechos gravados em segundos.")
+            tempo_total = time.time() - inicio_tempo
+            print(f"      ✅ Finalizado em {tempo_total:.1f} segundos. ({novos} trechos)")
             
         except Exception as e:
             print(f"      ❌ Erro em {arq}: {e}")
             traceback.print_exc()
 
     conn.close()
-    print("✨ Processo Finalizado!")
+    print("\n✨ Processo Finalizado!")
 
 if __name__ == "__main__":
     processar_e_salvar()
